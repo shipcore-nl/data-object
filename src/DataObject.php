@@ -150,15 +150,19 @@ abstract class DataObject
     private function checkType($type, $value)
     {
         switch ($type) {
-            case "boolean":
+            case 'boolean':
+            case 'bool':
                 return is_bool($value);
-            case "integer":
+            case 'integer':
+            case 'int':
+            case 'long':
                 return is_int($value);
-            case "string":
+            case 'string':
                 return is_string($value);
-            case "double":
+            case 'double':
+            case 'float':
                 return is_float($value);
-            case "mixed":
+            case 'mixed':
                 return true;
             default:
                 return $value instanceof $type;
@@ -177,10 +181,9 @@ abstract class DataObject
                 $property->setAccessible(true);
                 $property->setValue($this, $valueArray);
             } else {
-                if ($propertyClass && is_array($value) && is_subclass_of($rawType, \ShipCore\DataObject\DataObject::class)) {
+                if ($propertyClass && is_array($value) && is_subclass_of($propertyClass, \ShipCore\DataObject\DataObject::class)) {
                     $value = new $propertyClass($value);
-                }
-                if (!$this->checkType($this->getType($property), $value)) {
+                } elseif (!$this->checkType($this->getType($property), $value)) {
                     throw new \ShipCore\DataObject\Exception\InvalidTypeException(
                         static::class,
                         $propertyName,
@@ -266,7 +269,11 @@ abstract class DataObject
         foreach ($this->reflectionClass->getProperties() as $property) {
             if ($this->isAccessible($property)) {
                 $property->setAccessible(true);
-                $data[$property->getName()] = $property->getValue($this);
+                $value = $property->getValue($this);
+                if (isset($value)) {
+                    $data[$property->getName()] =
+                        is_subclass_of($value, \ShipCore\DataObject\DataObject::class) ? $value->toDataArray() : $value;
+                }
             }
         }
         
@@ -277,5 +284,26 @@ abstract class DataObject
     {
         $className = static::class;
         return new $className($data);
+    }
+    
+    public static function fromStdClass($data)
+    {
+        return self::fromDataArray(self::stdClassToArray($data));
+    }
+    
+    private static function stdClassToArray($object)
+    {
+        if ($object instanceof \stdClass) {
+            $data = [];
+            foreach ((array)$object as $key => $value) {
+                if ($value instanceof \stdClass) {
+                    $value = self::stdClassToArray($value);
+                }
+                $data[$key] = $value;
+            }
+            return $data;
+        }
+        
+        return null;
     }
 }
