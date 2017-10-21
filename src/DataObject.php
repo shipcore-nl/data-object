@@ -1,8 +1,8 @@
 <?php
 namespace ShipCore\DataObject;
 
-use ShipCore\DataObject\Annotation\Accessible;
 use Doctrine\Common\Annotations\AnnotationReader;
+use Doctrine\Common\Annotations\AnnotationRegistry;
 use PhpDocReader\PhpDocReader;
 
 abstract class DataObject
@@ -18,20 +18,35 @@ abstract class DataObject
      * @var PhpDocReader
      */
     private static $docReader;
+
+    /**
+     *
+     * @var \ReflectionClass
+     */
+    private $reflectionClass;
     
     public function __construct($data)
     {
-        $className = static::class;
-        $reflectionClass = new \ReflectionClass($className);
-        
+        if (!self::$annotationReader) {
+            self::$annotationReader =  new AnnotationReader();
+            AnnotationRegistry::registerLoader('class_exists');
+        }
+
+        if (!self::$docReader) {
+            self::$docReader =  new PhpDocReader();
+        }
+
+        $this->reflectionClass = new \ReflectionClass(static::class);
+                
         /* @var $property \ReflectionProperty */
-        foreach ($reflectionClass->getProperties() as $property) {
-            if (isset($data[$property->getName()]) && $this->canAccess($property)) {
-                $this->setData($property->getName(), $data[$property->getName()]);
+        foreach ($this->reflectionClass->getProperties() as $property) {
+            $propertyName = $property->getName();
+            if (isset($data[$propertyName])) {
+                $this->setData($propertyName, $data[$propertyName]);
             } elseif ($this->isRequired($property)) {
                 throw new \ShipCore\DataObject\Exception\MissingPropertyException(
-                    $className,
-                    $property->getName()
+                    static::class,
+                    $propertyName
                 );
             }
         }
@@ -39,14 +54,12 @@ abstract class DataObject
     
     private function isRequired(\ReflectionProperty $property)
     {
-        $accessibleAnnotation = self::getAnnotationReader()->getPropertyAnnotation($property, \ShipCore\DataObject\Annotation\Required::class);
-        return $accessibleAnnotation;
+        return self::$annotationReader->getPropertyAnnotation($property, \ShipCore\DataObject\Annotation\Required::class);
     }
     
-    private function canAccess(\ReflectionProperty $property)
+    private function isAccessible(\ReflectionProperty $property)
     {
-        $accessibleAnnotation = self::getAnnotationReader()->getPropertyAnnotation($property, \ShipCore\DataObject\Annotation\Accessible::class);
-        return $accessibleAnnotation;
+        return self::$annotationReader->getPropertyAnnotation($property, \ShipCore\DataObject\Annotation\Accessible::class);
     }
     
     /**
@@ -70,10 +83,7 @@ abstract class DataObject
         if (preg_match('/@var\s+([^\s]+)/', $property->getDocComment(), $matches)) {
             list(, $rawType) = $matches;
         } else {
-            throw new \ShipCore\DataObject\Exception\UnkownTypeException(
-                get_class($this),
-                $property->getName()
-            );
+            $rawType = 'mixed';
         }
         return $rawType;
     }
@@ -96,13 +106,8 @@ abstract class DataObject
      */
     private function getType(\ReflectionProperty $property)
     {
-        $docReader = self::getDocReader();
-        
-        if ($docReader->getPropertyClass($property)) {
-            return $docReader->getPropertyClass($property);
-        }
-        
-        return $this->getRawType($property);
+        $propertyClass = self::$docReader->getPropertyClass($property);
+        return $propertyClass ? $propertyClass : $this->getRawType($property);
     }
     
     /**
@@ -115,7 +120,7 @@ abstract class DataObject
     {
         if (!is_array($value)) {
             throw new \ShipCore\DataObject\Exception\InvalidTypeException(
-                    get_class($this),
+                    static::class,
                     $property->getName(),
                     $this->getType($property)
             );
@@ -132,7 +137,7 @@ abstract class DataObject
             }
             if (!$this->checkType($itemType, $item)) {
                 throw new \ShipCore\DataObject\Exception\InvalidTypeException(
-                    get_class($this),
+                    static::class,
                     $property->getName(),
                     $this->getType($property)
                 );
@@ -162,11 +167,9 @@ abstract class DataObject
     
     private function setData($propertyName, $value)
     {
-        $className = static::class;
-        $reflectionClass = new \ReflectionClass($className);
-        $property = $reflectionClass->getProperty($propertyName);
-        if ($property && $this->canAccess($property)) {
-            $propertyClass = self::getDocReader()->getPropertyClass($property);
+        $property = $this->reflectionClass->getProperty($propertyName);
+        if ($property && $this->isAccessible($property)) {
+            $propertyClass = self::$docReader->getPropertyClass($property);
             
             $rawType = $this->getRawType($property);
             if ($this->isArrayType($rawType)) {
@@ -179,56 +182,58 @@ abstract class DataObject
                 }
                 if (!$this->checkType($this->getType($property), $value)) {
                     throw new \ShipCore\DataObject\Exception\InvalidTypeException(
-                        get_class($this),
-                        $property->getName(),
+                        static::class,
+                        $propertyName,
                         $this->getType($property)
                     );
                 }
                 $property->setAccessible(true);
                 $property->setValue($this, $value);
             }
+        } else {
+            throw new \ShipCore\DataObject\Exception\InvalidPropertyException(
+                static::class,
+                $propertyName
+                );
         }
-    }
-    
-    /**
-     *
-     * @param string $propertyName
-     * @return bool
-     */
-    private function propertyExists($propertyName)
-    {
-        $className = static::class;
-        $reflectionClass = new \ReflectionClass($className);
-        return ($reflectionClass->hasProperty($propertyName) && $this->canAccess($reflectionClass->getProperty($propertyName)));
     }
     
     private function getProperty($propertyName)
     {
-        $className = static::class;
-        $reflectionClass = new \ReflectionClass($className);
-        $property = $reflectionClass->getProperty($propertyName);
-        if ($property && $this->canAccess($property)) {
+        $property = $this->reflectionClass->getProperty($propertyName);
+        
+        if ($property && $this->isAccessible($property)) {
             $property->setAccessible(true);
             return $property->getValue($this);
+        } else {
+            throw new \ShipCore\DataObject\Exception\InvalidPropertyException(
+                static::class,
+                $propertyName
+                );
         }
     }
     
     private function setProperty($propertyName, $value)
     {
-        $className = static::class;
-        $reflectionClass = new \ReflectionClass($className);
-        $property = $reflectionClass->getProperty($propertyName);
-        if ($property && $this->canAccess($property)) {
-            if ($this->checkType($this->getType($property), $value)) {
+        $property = $this->reflectionClass->getProperty($propertyName);
+        $propertyType = $this->getType($property);
+        
+        if ($property && $this->isAccessible($property)) {
+            if ($this->checkType($propertyType, $value)) {
                 $property->setAccessible(true);
                 $property->setValue($this, $value);
             } else {
                 throw new \ShipCore\DataObject\Exception\InvalidTypeException(
-                    get_class($this),
-                    $property->getName(),
-                    $this->getType($property)
+                    static::class,
+                    $propertyName,
+                    $propertyType
                 );
             }
+        } else {
+            throw new \ShipCore\DataObject\Exception\InvalidPropertyException(
+                static::class,
+                $propertyName
+                );
         }
     }
     
@@ -245,62 +250,21 @@ abstract class DataObject
         switch (substr($method, 0, 3)) {
             case 'get':
                 $propertyName = lcfirst(substr($method, 3));
-                if (!$this->propertyExists($propertyName)) {
-                    throw new \ShipCore\DataObject\Exception\InvalidPropertyException(
-                       get_class($this),
-                       $propertyName
-                    );
-                }
                 return $this->getProperty($propertyName);
             case 'set':
                 $propertyName = lcfirst(substr($method, 3));
-                if (!$this->propertyExists($propertyName)) {
-                    throw new \ShipCore\DataObject\Exception\InvalidPropertyException(
-                       get_class($this),
-                       $propertyName
-                    );
-                }
                 $value = isset($args[0]) ? $args[0] : null;
                 return $this->setProperty($propertyName, $value);
         }
-        throw new \Exception('Invalid method ' .get_class($this) . "::" . $method);
-    }
-    
-    /**
-     *
-     * @return AnnotationReader
-     */
-    private static function getAnnotationReader()
-    {
-        if (!self::$annotationReader) {
-            self::$annotationReader =  new AnnotationReader();
-        }
-        return self::$annotationReader;
-    }
-    
-    /**
-     *
-     * @return PhpDocReader
-     */
-    private static function getDocReader()
-    {
-        if (!self::$docReader) {
-            self::$docReader =  new PhpDocReader();
-        }
-        return self::$docReader;
+        throw new \Exception('Invalid method ' . static::class . '::' . $method);
     }
     
     public function toDataArray()
     {
-        $className = static::class;
-        $reflectionClass = new \ReflectionClass($className);
-        $annotationReader = self::getAnnotationReader();
-        
         $data = [];
         /* @var $property \ReflectionProperty */
-        foreach ($reflectionClass->getProperties() as $property) {
-            $accessibleAnnotation = $annotationReader->getPropertyAnnotation($property, '\ShipCore\DataObject\Annotation\Accessible');
-            if ($accessibleAnnotation) {
+        foreach ($this->reflectionClass->getProperties() as $property) {
+            if ($this->isAccessible($property)) {
                 $property->setAccessible(true);
                 $data[$property->getName()] = $property->getValue($this);
             }
