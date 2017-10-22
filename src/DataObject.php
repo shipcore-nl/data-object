@@ -161,7 +161,7 @@ abstract class DataObject
                 return is_string($value);
             case 'double':
             case 'float':
-                return is_float($value);
+                return is_numeric($value);
             case 'mixed':
                 return true;
             default:
@@ -298,6 +298,13 @@ abstract class DataObject
             foreach ((array)$object as $key => $value) {
                 if ($value instanceof \stdClass) {
                     $value = self::stdClassToArray($value);
+                } elseif (is_array($value)) {
+                    foreach ($value as $childKey => $childValue) {
+                        if ($childValue instanceof \stdClass) {
+                            $childValue = self::stdClassToArray($childValue);
+                            $value[$childKey] = $childValue;
+                        }
+                    }
                 }
                 $data[$key] = $value;
             }
