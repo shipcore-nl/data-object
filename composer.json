@@ -2,7 +2,7 @@
     "name": "shipcore-nl/data-object",
     "description": "Data Object abstraction",
     "type": "library",
-    "version": "0.0.1-dev",
+    "version": "1.0.0",
     "license": "MIT",
     "require": {
         "php": "^5.5.0 || ~7.0 || ~7.1",
