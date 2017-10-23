@@ -271,6 +271,13 @@ abstract class DataObject
                 $property->setAccessible(true);
                 $value = $property->getValue($this);
                 if (isset($value)) {
+                    if (is_array($value)) {
+                        foreach ($value as $childKey => $childValue) {
+                            if (is_subclass_of($childValue, \ShipCore\DataObject\DataObject::class)) {
+                                $value[$childKey] = $childValue->toDataArray();
+                            }
+                        }
+                    }
                     $data[$property->getName()] =
                         is_subclass_of($value, \ShipCore\DataObject\DataObject::class) ? $value->toDataArray() : $value;
                 }
